@@ -1,705 +1,1292 @@
-// Main Application Script
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize variables
-    let currentDocumentType = '';
-    let currentDocumentData = null;
-    let documentCounter = localStorage.getItem('samani_doc_counter') || 1000;
-    
-    // DOM Elements
-    const navTabs = document.querySelectorAll('.nav-tab');
-    const tabContents = document.querySelectorAll('.tab-content');
-    const docCards = document.querySelectorAll('.doc-card');
-    const formContainer = document.getElementById('formContainer');
-    const documentForm = document.getElementById('documentForm');
-    const formTitle = document.getElementById('formTitle');
-    const docTypeInput = document.getElementById('docType');
-    const docRefInput = document.getElementById('docRef');
-    const receiptFields = document.getElementById('receiptFields');
-    const applyTaxCheckbox = document.getElementById('applyTax');
-    const taxRow = document.getElementById('taxRow');
-    const itemsBody = document.getElementById('itemsBody');
-    const addItemBtn = document.getElementById('addItemBtn');
-    const previewBtn = document.getElementById('previewBtn');
-    const generatePdfBtn = document.getElementById('generatePdfBtn');
-    const clearFormBtn = document.getElementById('clearFormBtn');
-    const previewModal = document.getElementById('previewModal');
-    const previewContent = document.getElementById('previewContent');
-    const modalClose = document.querySelector('.modal-close');
-    const documentsList = document.getElementById('documentsList');
-    const clearArchiveBtn = document.getElementById('clearArchiveBtn');
-    
-    // Initialize the application
-    initializeApp();
-    
-    // Function to initialize the application
-    function initializeApp() {
-        // Set today's date
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('date').value = today;
-        
-        // Set default due date (14 days from today)
-        const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + 14);
-        document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
-        
-        // Set default payment terms
-        document.getElementById('paymentTerms').value = 'Net 14';
-        
-        // Add event listeners
-        setupEventListeners();
-        
-        // Load archived documents
-        loadArchivedDocuments();
-        
-        // Initialize item calculations
-        recalculateTotals();
-    }
-    
-    // Set up all event listeners
-    function setupEventListeners() {
-        // Navigation tabs
-        navTabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabId = tab.dataset.tab;
-                switchTab(tabId);
-            });
-        });
-        
-        // Document type selection
-        docCards.forEach(card => {
-            card.querySelector('.btn-select').addEventListener('click', function(e) {
-                e.stopPropagation();
-                const type = this.parentElement.dataset.type;
-                selectDocumentType(type);
-            });
-        });
-        
-        // Item table events
-        addItemBtn.addEventListener('click', addNewItemRow);
-        itemsBody.addEventListener('input', function(e) {
-            if (e.target.classList.contains('item-qty') || 
-                e.target.classList.contains('item-price')) {
-                updateItemTotal(e.target);
-            }
-            recalculateTotals();
-        });
-        
-        itemsBody.addEventListener('click', function(e) {
-            if (e.target.closest('.btn-remove-row')) {
-                const btn = e.target.closest('.btn-remove-row');
-                if (!btn.disabled) {
-                    removeItemRow(btn);
-                }
-            }
-        });
-        
-        // Tax checkbox
-        applyTaxCheckbox.addEventListener('change', recalculateTotals);
-        
-        // Form buttons
-        previewBtn.addEventListener('click', generatePreview);
-        generatePdfBtn.addEventListener('click', generateAndSavePDF);
-        clearFormBtn.addEventListener('click', clearForm);
-        
-        // Modal
-        modalClose.addEventListener('click', closeModal);
-        previewModal.addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeModal();
-            }
-        });
-        
-        // Archive
-        clearArchiveBtn.addEventListener('click', clearAllArchivedDocuments);
-        
-        // Form submission
-        documentForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-        });
-    }
-    
-    // Switch between tabs
-    function switchTab(tabId) {
-        // Update active tab
-        navTabs.forEach(tab => tab.classList.remove('active'));
-        document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
-        
-        // Show active content
-        tabContents.forEach(content => {
-            content.classList.remove('active');
-            if (content.id === `${tabId}Tab`) {
-                content.classList.add('active');
-            }
-        });
-    }
-    
-    // Select document type and show form
-    function selectDocumentType(type) {
-        currentDocumentType = type;
-        
-        // Update UI
-        document.querySelector('.document-selector').style.display = 'none';
-        formContainer.style.display = 'block';
-        
-        // Set form title
-        const titles = {
-            'quote': 'Create Quotation',
-            'invoice': 'Create Invoice',
-            'receipt': 'Create Receipt'
-        };
-        formTitle.textContent = titles[type];
-        
-        // Set document type in hidden field
-        docTypeInput.value = type;
-        
-        // Generate and set reference number
-        generateReferenceNumber(type);
-        
-        // Show/hide receipt fields
-        if (type === 'receipt') {
-            receiptFields.style.display = 'block';
-            document.getElementById('paymentMode').required = true;
-        } else {
-            receiptFields.style.display = 'none';
-            document.getElementById('paymentMode').required = false;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAMANI CREATIONS LTD | Professional Invoicing System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --accent-color: #e67e22;
+            --success-color: #27ae60;
+            --danger-color: #e74c3c;
+            --light-color: #ecf0f1;
+            --dark-color: #2c3e50;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
-        
-        // Scroll to form
-        formContainer.scrollIntoView({ behavior: 'smooth' });
-    }
-    
-    // Generate a unique reference number
-    function generateReferenceNumber(type) {
-        const prefixes = {
-            'quote': 'QT',
-            'invoice': 'INV',
-            'receipt': 'RCT'
-        };
-        
-        documentCounter++;
-        localStorage.setItem('samani_doc_counter', documentCounter);
-        
-        const prefix = prefixes[type] || 'DOC';
-        const refNumber = documentCounter.toString().padStart(4, '0');
-        const ref = `SAMANI_UG-${prefix}-${refNumber}`;
-        
-        docRefInput.value = ref;
-        return ref;
-    }
-    
-    // Add a new item row to the table
-    function addNewItemRow() {
-        const newRow = document.createElement('tr');
-        newRow.innerHTML = `
-            <td><input type="text" class="item-desc" placeholder="Item description" required></td>
-            <td><input type="number" class="item-qty" value="1" min="1" step="1" required></td>
-            <td><input type="number" class="item-price" value="0" min="0" step="1000" required></td>
-            <td><input type="text" class="item-total" value="0" readonly></td>
-            <td><button type="button" class="btn-remove-row"><i class="fas fa-trash"></i></button></td>
-        `;
-        
-        itemsBody.appendChild(newRow);
-        
-        // Update remove buttons (disable if only one row)
-        updateRemoveButtons();
-        
-        // Recalculate totals
-        recalculateTotals();
-    }
-    
-    // Remove an item row
-    function removeItemRow(button) {
-        const row = button.closest('tr');
-        const rows = itemsBody.querySelectorAll('tr');
-        
-        if (rows.length > 1) {
-            row.remove();
-            updateRemoveButtons();
-            recalculateTotals();
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-    }
-    
-    // Update remove buttons state (disable if only one row)
-    function updateRemoveButtons() {
-        const rows = itemsBody.querySelectorAll('tr');
-        const removeButtons = itemsBody.querySelectorAll('.btn-remove-row');
-        
-        removeButtons.forEach(btn => {
-            btn.disabled = rows.length <= 1;
-        });
-    }
-    
-    // Update total for a single item row
-    function updateItemTotal(input) {
-        const row = input.closest('tr');
-        const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-        const price = parseFloat(row.querySelector('.item-price').value) || 0;
-        const total = qty * price;
-        
-        row.querySelector('.item-total').value = formatNumber(total);
-    }
-    
-    // Recalculate all totals (subtotal, tax, grand total)
-    function recalculateTotals() {
-        const rows = itemsBody.querySelectorAll('tr');
-        let subtotal = 0;
-        
-        rows.forEach(row => {
-            const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-            const price = parseFloat(row.querySelector('.item-price').value) || 0;
-            subtotal += qty * price;
-        });
-        
-        const applyTax = applyTaxCheckbox.checked;
-        const taxRate = 0.18; // 18%
-        const taxAmount = applyTax ? subtotal * taxRate : 0;
-        const grandTotal = subtotal + taxAmount;
-        
-        // Update display
-        document.getElementById('displaySubtotal').textContent = formatCurrency(subtotal);
-        document.getElementById('displayTax').textContent = formatCurrency(taxAmount);
-        document.getElementById('displayGrandTotal').textContent = formatCurrency(grandTotal);
-        
-        // Show/hide tax row
-        taxRow.style.display = applyTax ? 'block' : 'none';
-    }
-    
-    // Format number with commas (for display)
-    function formatNumber(num) {
-        return num.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    }
-    
-    // Format as currency
-    function formatCurrency(amount) {
-        return formatNumber(amount) + ' UGX';
-    }
-    
-    // Clear the form and reset to document selection
-    function clearForm() {
-        if (confirm('Clear the current form and return to document selection?')) {
-            documentForm.reset();
-            itemsBody.innerHTML = `
-                <tr>
-                    <td><input type="text" class="item-desc" placeholder="e.g., Custom Wooden Table" required></td>
-                    <td><input type="number" class="item-qty" value="1" min="1" step="1" required></td>
-                    <td><input type="number" class="item-price" value="0" min="0" step="1000" required></td>
-                    <td><input type="text" class="item-total" value="0" readonly></td>
-                    <td><button type="button" class="btn-remove-row" disabled><i class="fas fa-trash"></i></button></td>
-                </tr>
-            `;
-            
-            // Reset dates and defaults
+
+        body {
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .container {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary-color), #1a252f);
+            color: white;
+            padding: 25px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .company-info {
+            display: flex;
+            align-items: center;
+            gap: 25px;
+            flex: 1;
+        }
+
+        .company-logo {
+            height: 80px;
+            width: auto;
+            border-radius: 4px;
+        }
+
+        .company-text h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+            color: white;
+        }
+
+        .company-text p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .contact-info {
+            text-align: right;
+            font-size: 14px;
+        }
+
+        .contact-info p {
+            margin: 4px 0;
+        }
+
+        /* Navigation */
+        .document-selector {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .doc-type-cards {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+
+        .doc-card {
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            text-align: center;
+            flex: 1;
+            min-width: 200px;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        .doc-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .doc-card.active {
+            border-color: var(--secondary-color);
+            background: rgba(52, 152, 219, 0.05);
+        }
+
+        .doc-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+        }
+
+        .doc-icon.quote {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+        }
+
+        .doc-icon.invoice {
+            background: linear-gradient(135deg, #e67e22, #d35400);
+        }
+
+        .doc-icon.receipt {
+            background: linear-gradient(135deg, #27ae60, #219653);
+        }
+
+        .doc-card h3 {
+            color: var(--primary-color);
+            margin-bottom: 8px;
+            font-size: 18px;
+        }
+
+        .doc-card p {
+            color: #666;
+            font-size: 13px;
+        }
+
+        /* Main Form */
+        .main-content {
+            padding: 30px 40px;
+        }
+
+        .form-header {
+            padding-bottom: 20px;
+            margin-bottom: 25px;
+            border-bottom: 2px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .form-header h2 {
+            color: var(--primary-color);
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #219653;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: var(--primary-color);
+            border: 1px solid #ddd;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
+            border-color: var(--secondary-color);
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        /* Form Sections */
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: var(--border-radius);
+        }
+
+        .form-section h4 {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: var(--border-radius);
+            font-size: 15px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            border-color: var(--secondary-color);
+            outline: none;
+        }
+
+        /* Items Table */
+        .items-table-container {
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .items-table th {
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .items-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .items-table input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .items-table textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .btn-add-item {
+            margin-top: 15px;
+            background: var(--secondary-color);
+            color: white;
+            padding: 12px 25px;
+        }
+
+        .btn-add-item:hover {
+            background: #2980b9;
+        }
+
+        .btn-remove-item {
+            background: transparent;
+            color: var(--danger-color);
+            padding: 5px 10px;
+            font-size: 14px;
+        }
+
+        /* Tax Toggle */
+        .tax-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: var(--border-radius);
+            border: 1px solid #dee2e6;
+        }
+
+        .tax-toggle label {
+            font-weight: 500;
+            color: #555;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .tax-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        /* Totals Section */
+        .totals-section {
+            background: white;
+            padding: 25px;
+            border-radius: var(--border-radius);
+            border: 2px solid #dee2e6;
+        }
+
+        .totals-row {
+            max-width: 500px;
+            margin-left: auto;
+        }
+
+        .total-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 16px;
+        }
+
+        .total-item:last-child {
+            border-bottom: none;
+        }
+
+        .grand-total {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--primary-color);
+            padding-top: 15px;
+            border-top: 2px solid #2c3e50;
+        }
+
+        /* Receipt Specific Fields */
+        #receiptFields .form-row {
+            background: #e8f4fc;
+            padding: 15px;
+            border-radius: var(--border-radius);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+                text-align: center;
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .company-info {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .contact-info {
+                text-align: center;
+            }
+
+            .doc-type-cards {
+                flex-direction: column;
+            }
+
+            .main-content,
+            .document-selector {
+                padding: 20px;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .form-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .form-actions {
+                width: 100%;
+                justify-content: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="company-info">
+                <img src="https://i.ibb.co/H1wL4ph/official-samani-logo.png" alt="SAMANI CREATIONS" class="company-logo">
+                <div class="company-text">
+                    <h1>SAMANI CREATIONS LTD</h1>
+                    <p>Furniture • Interior Design • Woodwork</p>
+                    <p>Professional Invoicing System</p>
+                </div>
+            </div>
+            <div class="contact-info">
+                <p><i class="fas fa-phone"></i> +256-740-317419</p>
+                <p><i class="fas fa-map-marker-alt"></i> Client Site Location</p>
+                <p><i class="fas fa-calendar"></i> <span id="currentDate"></span></p>
+            </div>
+        </header>
+
+        <!-- Document Type Selection -->
+        <div class="document-selector">
+            <h3><i class="fas fa-file-alt"></i> Select Document Type</h3>
+            <div class="doc-type-cards">
+                <div class="doc-card active" data-type="quote">
+                    <div class="doc-icon quote">
+                        <i class="fas fa-file-signature"></i>
+                    </div>
+                    <h3>QUOTATION</h3>
+                    <p>Create professional quotes for clients</p>
+                </div>
+                <div class="doc-card" data-type="invoice">
+                    <div class="doc-icon invoice">
+                        <i class="fas fa-file-invoice-dollar"></i>
+                    </div>
+                    <h3>INVOICE</h3>
+                    <p>Generate invoices for completed work</p>
+                </div>
+                <div class="doc-card" data-type="receipt">
+                    <div class="doc-icon receipt">
+                        <i class="fas fa-receipt"></i>
+                    </div>
+                    <h3>RECEIPT</h3>
+                    <p>Issue receipts for payments received</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Form -->
+        <div class="main-content">
+            <div class="form-header">
+                <h2><i class="fas fa-edit"></i> Create <span id="documentTypeLabel">Quotation</span></h2>
+                <div class="form-actions">
+                    <button id="previewBtn" class="btn-secondary">
+                        <i class="fas fa-eye"></i> Preview
+                    </button>
+                    <button id="generatePdfBtn" class="btn-primary">
+                        <i class="fas fa-file-pdf"></i> Generate PDF
+                    </button>
+                    <button id="clearFormBtn" class="btn-danger">
+                        <i class="fas fa-trash"></i> Clear Form
+                    </button>
+                </div>
+            </div>
+
+            <form id="documentForm">
+                <!-- Document Info -->
+                <div class="form-section">
+                    <h4><i class="fas fa-info-circle"></i> Document Information</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="date">Date *</label>
+                            <input type="date" id="date" name="date" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="dueDate">Due Date (Optional)</label>
+                            <input type="date" id="dueDate" name="dueDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="paymentTerms">Payment Terms</label>
+                            <select id="paymentTerms" name="paymentTerms">
+                                <option value="">Select Terms</option>
+                                <option value="Net 7">Net 7 Days</option>
+                                <option value="Net 14" selected>Net 14 Days</option>
+                                <option value="Net 30">Net 30 Days</option>
+                                <option value="50% Advance">50% Advance</option>
+                                <option value="100% Advance">100% Advance</option>
+                                <option value="Upon Completion">Upon Completion</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Client Information -->
+                <div class="form-section">
+                    <h4><i class="fas fa-user-tie"></i> Client Information</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="clientName">Client Name *</label>
+                            <input type="text" id="clientName" name="clientName" placeholder="Enter client name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="clientEmail">Client Email</label>
+                            <input type="email" id="clientEmail" name="clientEmail" placeholder="client@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="clientPhone">Client Phone</label>
+                            <input type="tel" id="clientPhone" name="clientPhone" placeholder="+256-XXX-XXXXXX">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="projectName">Project Name *</label>
+                            <input type="text" id="projectName" name="projectName" placeholder="Enter project name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="clientSite">Client Site Location</label>
+                            <input type="text" id="clientSite" name="clientSite" placeholder="Site address">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="clientAddress">Client Address (Optional)</label>
+                        <textarea id="clientAddress" name="clientAddress" rows="2" placeholder="Full address"></textarea>
+                    </div>
+                </div>
+
+                <!-- Items & Services -->
+                <div class="form-section">
+                    <h4><i class="fas fa-list-alt"></i> Items & Services</h4>
+                    <div class="items-table-container">
+                        <table class="items-table">
+                            <thead>
+                                <tr>
+                                    <th>Item Name</th>
+                                    <th>Description</th>
+                                    <th width="120">Quantity</th>
+                                    <th width="150">Rate (UGX)</th>
+                                    <th width="150">Total (UGX)</th>
+                                    <th width="80">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="itemsBody">
+                                <!-- Items will be added here dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="addItemBtn" class="btn-add-item">
+                        <i class="fas fa-plus"></i> Add New Item
+                    </button>
+                </div>
+
+                <!-- Tax Toggle -->
+                <div class="tax-toggle">
+                    <label>
+                        <input type="checkbox" id="includeTax" checked>
+                        <span>Include 18% Tax in calculations</span>
+                    </label>
+                </div>
+
+                <!-- Receipt Specific Fields -->
+                <div id="receiptFields" class="form-section" style="display: none;">
+                    <h4><i class="fas fa-money-check-alt"></i> Payment Information (For Receipts Only)</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="paymentMode">Payment Mode *</label>
+                            <select id="paymentMode" name="paymentMode">
+                                <option value="">Select Mode</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="Mobile Money">Mobile Money</option>
+                                <option value="Cash">Cash</option>
+                                <option value="Cheque">Cheque</option>
+                                <option value="VISA Card">VISA Card</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="accountNumber">Account/Reference Number *</label>
+                            <input type="text" id="accountNumber" name="accountNumber" placeholder="Transaction reference">
+                        </div>
+                        <div class="form-group">
+                            <label for="invoiceRef">Related Invoice Reference (Optional)</label>
+                            <input type="text" id="invoiceRef" name="invoiceRef" placeholder="SAMANI_UG-INV-XXXX">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Totals Section -->
+                <div class="form-section totals-section">
+                    <h4><i class="fas fa-calculator"></i> Financial Summary</h4>
+                    <div class="totals-row">
+                        <div class="total-item">
+                            <span>Subtotal:</span>
+                            <span id="subtotal">0 UGX</span>
+                        </div>
+                        <div class="total-item" id="taxRow">
+                            <span>Tax (18%):</span>
+                            <span id="taxAmount">0 UGX</span>
+                        </div>
+                        <div class="total-item grand-total">
+                            <span>TOTAL AMOUNT:</span>
+                            <span id="grandTotal">0 UGX</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notes -->
+                <div class="form-section">
+                    <h4><i class="fas fa-sticky-note"></i> Additional Notes (Optional)</h4>
+                    <div class="form-group">
+                        <textarea id="notes" name="notes" rows="4" placeholder="Add any additional notes, terms, or conditions here..."></textarea>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: white; border-radius: 10px; width: 90%; max-width: 800px; max-height: 90vh; overflow: hidden;">
+            <div style="padding: 20px; background: #2c3e50; color: white; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0;">Document Preview</h3>
+                <button id="closePreview" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">&times;</button>
+            </div>
+            <div style="padding: 30px; overflow-y: auto; max-height: 70vh;">
+                <div id="previewContent"></div>
+            </div>
+            <div style="padding: 20px; background: #f8f9fa; border-top: 1px solid #dee2e6; text-align: right;">
+                <button id="printPreviewBtn" class="btn-secondary" style="margin-right: 10px;">
+                    <i class="fas fa-print"></i> Print
+                </button>
+                <button id="downloadPdfBtn" class="btn-primary">
+                    <i class="fas fa-download"></i> Download PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentDocumentType = 'quote';
+        let documentCounter = {
+            quote: 1,
+            invoice: 1,
+            receipt: 1
+        };
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set current date
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('date').value = today;
-            
+            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            // Set due date to 14 days from now
             const dueDate = new Date();
             dueDate.setDate(dueDate.getDate() + 14);
             document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
-            
-            document.getElementById('paymentTerms').value = 'Net 14';
-            applyTaxCheckbox.checked = false;
-            
-            // Hide form, show document selector
-            formContainer.style.display = 'none';
-            document.querySelector('.document-selector').style.display = 'block';
-            
-            // Reset calculations
-            recalculateTotals();
-        }
-    }
-    
-    // Validate form before proceeding
-    function validateForm() {
-        const requiredFields = documentForm.querySelectorAll('[required]');
-        let isValid = true;
-        
-        // Check required fields
-        requiredFields.forEach(field => {
-            if (!field.value.trim()) {
-                field.style.borderColor = 'var(--danger-color)';
-                isValid = false;
-            } else {
-                field.style.borderColor = '';
-            }
+
+            // Initialize items table
+            addNewItemRow();
+
+            // Event Listeners
+            setupEventListeners();
+
+            // Calculate initial totals
+            calculateTotals();
         });
-        
-        // Check if at least one item has description and price > 0
-        const items = document.querySelectorAll('#itemsBody tr');
-        let hasValidItems = false;
-        
-        items.forEach(row => {
-            const desc = row.querySelector('.item-desc').value.trim();
-            const price = parseFloat(row.querySelector('.item-price').value) || 0;
-            if (desc && price > 0) {
-                hasValidItems = true;
-            }
-        });
-        
-        if (!hasValidItems) {
-            alert('Please add at least one item with a description and price greater than 0.');
-            isValid = false;
-        }
-        
-        return isValid;
-    }
-    
-    // Collect form data into an object
-    function collectFormData() {
-        const formData = new FormData(documentForm);
-        const data = Object.fromEntries(formData.entries());
-        
-        // Collect items
-        const items = [];
-        document.querySelectorAll('#itemsBody tr').forEach(row => {
-            const desc = row.querySelector('.item-desc').value.trim();
-            if (desc) {
-                items.push({
-                    description: desc,
-                    quantity: parseFloat(row.querySelector('.item-qty').value) || 1,
-                    price: parseFloat(row.querySelector('.item-price').value) || 0,
-                    total: parseFloat(row.querySelector('.item-total').value.replace(/,/g, '')) || 0
+
+        function setupEventListeners() {
+            // Document type selection
+            document.querySelectorAll('.doc-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    document.querySelectorAll('.doc-card').forEach(c => c.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    currentDocumentType = this.dataset.type;
+                    document.getElementById('documentTypeLabel').textContent = 
+                        currentDocumentType.charAt(0).toUpperCase() + currentDocumentType.slice(1);
+                    
+                    // Show/hide receipt fields
+                    const receiptFields = document.getElementById('receiptFields');
+                    receiptFields.style.display = currentDocumentType === 'receipt' ? 'block' : 'none';
+                    
+                    // Generate new reference number
+                    generateReferenceNumber();
                 });
-            }
-        });
-        
-        data.items = items;
-        data.applyTax = applyTaxCheckbox.checked;
-        data.subtotal = parseFloat(document.getElementById('displaySubtotal').textContent.replace(/[^0-9.-]+/g, '')) || 0;
-        data.taxAmount = parseFloat(document.getElementById('displayTax').textContent.replace(/[^0-9.-]+/g, '')) || 0;
-        data.grandTotal = parseFloat(document.getElementById('displayGrandTotal').textContent.replace(/[^0-9.-]+/g, '')) || 0;
-        data.createdAt = new Date().toISOString();
-        data.docType = currentDocumentType;
-        
-        return data;
-    }
-    
-    // Generate HTML preview of the document
-    function generatePreview() {
-        if (!validateForm()) {
-            alert('Please fill in all required fields correctly.');
-            return;
+            });
+
+            // Add item button
+            document.getElementById('addItemBtn').addEventListener('click', addNewItemRow);
+
+            // Tax toggle
+            document.getElementById('includeTax').addEventListener('change', calculateTotals);
+
+            // Preview button
+            document.getElementById('previewBtn').addEventListener('click', generatePreview);
+
+            // Generate PDF button
+            document.getElementById('generatePdfBtn').addEventListener('click', generatePDF);
+
+            // Clear form button
+            document.getElementById('clearFormBtn').addEventListener('click', clearForm);
+
+            // Close preview
+            document.getElementById('closePreview').addEventListener('click', function() {
+                document.getElementById('previewModal').style.display = 'none';
+            });
+
+            // Print preview
+            document.getElementById('printPreviewBtn').addEventListener('click', function() {
+                window.print();
+            });
+
+            // Download PDF from preview
+            document.getElementById('downloadPdfBtn').addEventListener('click', generatePDF);
+
+            // Close modal when clicking outside
+            document.getElementById('previewModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.style.display = 'none';
+                }
+            });
         }
-        
-        currentDocumentData = collectFormData();
-        const data = currentDocumentData;
-        
-        // Generate preview HTML
-        let previewHTML = `
-            <div class="preview-document">
-                <div class="preview-header">
-                    <div class="preview-company">
-                        <h1>SAMANI CREATIONS LTD</h1>
-                        <p><strong>Furniture • Interior Design • Woodwork</strong></p>
-                        <p><i class="fas fa-phone"></i> +256-740-317419</p>
+
+        function addNewItemRow() {
+            const itemsBody = document.getElementById('itemsBody');
+            const rowCount = itemsBody.children.length;
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <input type="text" class="item-name" placeholder="Item name" oninput="calculateItemTotal(this)">
+                </td>
+                <td>
+                    <textarea class="item-description" placeholder="Description" rows="2" oninput="calculateItemTotal(this)"></textarea>
+                </td>
+                <td>
+                    <input type="number" class="item-quantity" value="1" min="1" step="1" oninput="calculateItemTotal(this)">
+                </td>
+                <td>
+                    <input type="number" class="item-rate" value="0" min="0" step="0.01" oninput="calculateItemTotal(this)">
+                </td>
+                <td>
+                    <input type="text" class="item-total" value="0" readonly style="font-weight: bold;">
+                </td>
+                <td>
+                    <button type="button" class="btn-remove-item" onclick="removeItemRow(this)" title="Remove item">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            
+            itemsBody.appendChild(row);
+            calculateItemTotal(row.querySelector('.item-quantity'));
+        }
+
+        function calculateItemTotal(inputElement) {
+            const row = inputElement.closest('tr');
+            if (!row) return;
+            
+            const quantity = parseFloat(row.querySelector('.item-quantity').value) || 0;
+            const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
+            const total = quantity * rate;
+            
+            row.querySelector('.item-total').value = formatCurrency(total);
+            calculateTotals();
+        }
+
+        function removeItemRow(button) {
+            const row = button.closest('tr');
+            const rows = document.querySelectorAll('#itemsBody tr');
+            
+            if (rows.length > 1) {
+                row.remove();
+                calculateTotals();
+            } else {
+                alert('At least one item is required. Clear the row instead.');
+                row.querySelectorAll('input, textarea').forEach(input => input.value = '');
+                row.querySelector('.item-quantity').value = 1;
+                row.querySelector('.item-rate').value = 0;
+                row.querySelector('.item-total').value = formatCurrency(0);
+                calculateTotals();
+            }
+        }
+
+        function calculateTotals() {
+            const rows = document.querySelectorAll('#itemsBody tr');
+            let subtotal = 0;
+            
+            rows.forEach(row => {
+                const totalInput = row.querySelector('.item-total');
+                const totalValue = totalInput ? parseFloat(totalInput.value.replace(/[^0-9.-]+/g, '')) || 0 : 0;
+                subtotal += totalValue;
+            });
+            
+            const includeTax = document.getElementById('includeTax').checked;
+            const taxRate = 18;
+            const taxAmount = includeTax ? subtotal * (taxRate / 100) : 0;
+            const grandTotal = subtotal + taxAmount;
+            
+            // Update display
+            document.getElementById('subtotal').textContent = formatCurrency(subtotal);
+            document.getElementById('taxAmount').textContent = formatCurrency(taxAmount);
+            document.getElementById('grandTotal').textContent = formatCurrency(grandTotal);
+            
+            // Show/hide tax row
+            document.getElementById('taxRow').style.display = includeTax ? 'flex' : 'none';
+        }
+
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('en-UG', {
+                style: 'currency',
+                currency: 'UGX',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            }).format(amount);
+        }
+
+        function generateReferenceNumber() {
+            const prefixes = {
+                'quote': 'QT',
+                'invoice': 'INV',
+                'receipt': 'RCT'
+            };
+            
+            const prefix = prefixes[currentDocumentType];
+            const year = new Date().getFullYear().toString().slice(-2);
+            const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+            const count = documentCounter[currentDocumentType]++;
+            
+            return `SAMANI_UG-${prefix}-${year}${month}${count.toString().padStart(3, '0')}`;
+        }
+
+        function validateForm() {
+            const clientName = document.getElementById('clientName').value.trim();
+            const projectName = document.getElementById('projectName').value.trim();
+            
+            if (!clientName) {
+                alert('Please enter client name');
+                return false;
+            }
+            
+            if (!projectName) {
+                alert('Please enter project name');
+                return false;
+            }
+            
+            // Check if at least one item has a name and rate
+            const items = document.querySelectorAll('#itemsBody tr');
+            let hasValidItems = false;
+            items.forEach(row => {
+                const name = row.querySelector('.item-name').value.trim();
+                const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
+                if (name && rate > 0) {
+                    hasValidItems = true;
+                }
+            });
+            
+            if (!hasValidItems) {
+                alert('Please add at least one item with a name and rate greater than 0');
+                return false;
+            }
+            
+            // Additional validation for receipts
+            if (currentDocumentType === 'receipt') {
+                const paymentMode = document.getElementById('paymentMode').value;
+                const accountNumber = document.getElementById('accountNumber').value.trim();
+                
+                if (!paymentMode) {
+                    alert('Please select payment mode for receipt');
+                    return false;
+                }
+                
+                if (!accountNumber) {
+                    alert('Please enter account/reference number for receipt');
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+
+        function generatePreview() {
+            if (!validateForm()) return;
+            
+            const formData = collectFormData();
+            const previewHTML = createPreviewHTML(formData);
+            
+            document.getElementById('previewContent').innerHTML = previewHTML;
+            document.getElementById('previewModal').style.display = 'flex';
+        }
+
+        function collectFormData() {
+            const items = [];
+            document.querySelectorAll('#itemsBody tr').forEach(row => {
+                const name = row.querySelector('.item-name').value.trim();
+                if (name) {
+                    items.push({
+                        name: name,
+                        description: row.querySelector('.item-description').value.trim(),
+                        quantity: parseFloat(row.querySelector('.item-quantity').value) || 1,
+                        rate: parseFloat(row.querySelector('.item-rate').value) || 0,
+                        total: parseFloat(row.querySelector('.item-total').value.replace(/[^0-9.-]+/g, '')) || 0
+                    });
+                }
+            });
+            
+            const includeTax = document.getElementById('includeTax').checked;
+            const subtotal = parseFloat(document.getElementById('subtotal').textContent.replace(/[^0-9.-]+/g, '')) || 0;
+            const taxAmount = parseFloat(document.getElementById('taxAmount').textContent.replace(/[^0-9.-]+/g, '')) || 0;
+            const grandTotal = parseFloat(document.getElementById('grandTotal').textContent.replace(/[^0-9.-]+/g, '')) || 0;
+            
+            return {
+                docType: currentDocumentType,
+                docRef: generateReferenceNumber(),
+                date: document.getElementById('date').value,
+                dueDate: document.getElementById('dueDate').value || 'N/A',
+                paymentTerms: document.getElementById('paymentTerms').value || 'N/A',
+                clientName: document.getElementById('clientName').value,
+                clientEmail: document.getElementById('clientEmail').value || 'N/A',
+                clientPhone: document.getElementById('clientPhone').value || 'N/A',
+                clientAddress: document.getElementById('clientAddress').value || 'N/A',
+                projectName: document.getElementById('projectName').value,
+                clientSite: document.getElementById('clientSite').value || 'N/A',
+                paymentMode: document.getElementById('paymentMode').value || 'N/A',
+                accountNumber: document.getElementById('accountNumber').value || 'N/A',
+                invoiceRef: document.getElementById('invoiceRef').value || 'N/A',
+                notes: document.getElementById('notes').value || 'No additional notes',
+                items: items,
+                includeTax: includeTax,
+                subtotal: subtotal,
+                taxAmount: taxAmount,
+                grandTotal: grandTotal
+            };
+        }
+
+        function createPreviewHTML(data) {
+            const docTypeUpper = data.docType.toUpperCase();
+            const formattedDate = new Date(data.date).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            
+            let html = `
+                <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; background: white;">
+                    <!-- Header -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #2c3e50;">
+                        <div>
+                            <img src="https://i.ibb.co/H1wL4ph/official-samani-logo.png" alt="SAMANI CREATIONS" style="height: 80px; margin-bottom: 10px;">
+                            <h1 style="color: #2c3e50; margin: 5px 0; font-size: 24px;">SAMANI CREATIONS LTD</h1>
+                            <p style="color: #666; margin: 2px 0;">Furniture • Interior Design • Woodwork</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <h2 style="color: #e67e22; margin: 0; font-size: 28px;">${docTypeUpper}</h2>
+                            <p style="margin: 5px 0;"><strong>Reference:</strong> ${data.docRef}</p>
+                            <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
+                        </div>
                     </div>
-                    <div class="preview-logo-container">
-                        <img src="https://i.ibb.co/H1wL4ph/official-samani-logo.png" alt="SAMANI CREATIONS" class="preview-logo">
+                    
+                    <!-- Document Details -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                        <div>
+                            <h3 style="color: #2c3e50; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Bill To</h3>
+                            <p><strong>${data.clientName}</strong></p>
+                            <p>${data.clientAddress}</p>
+                            <p>Phone: ${data.clientPhone}</p>
+                            <p>Email: ${data.clientEmail}</p>
+                        </div>
+                        <div>
+                            <h3 style="color: #2c3e50; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Project Details</h3>
+                            <p><strong>Project:</strong> ${data.projectName}</p>
+                            <p><strong>Site Location:</strong> ${data.clientSite}</p>
+                            <p><strong>Payment Terms:</strong> ${data.paymentTerms}</p>
+                            ${data.dueDate !== 'N/A' ? `<p><strong>Due Date:</strong> ${new Date(data.dueDate).toLocaleDateString('en-US')}</p>` : ''}
+                        </div>
                     </div>
-                </div>
-                
-                <div class="preview-doc-title">
-                    <h2>${currentDocumentType.toUpperCase()}</h2>
-                    <p class="ref"><strong>Reference:</strong> ${data.docRef}</p>
-                    <p><strong>Date:</strong> ${data.date} ${data.dueDate ? ` | <strong>Due Date:</strong> ${data.dueDate}` : ''}</p>
-                </div>
-                
-                <div class="preview-section">
-                    <h3>Bill To:</h3>
-                    <p><strong>${data.clientName}</strong></p>
-                    <p>${data.projectName}</p>
-                    ${data.clientPhone ? `<p>Phone: ${data.clientPhone}</p>` : ''}
-                    ${data.clientSite ? `<p>Location: ${data.clientSite}</p>` : ''}
-                </div>
-                
-                <div class="preview-section">
-                    <h3>Items & Services</h3>
-                    <table class="preview-items">
+                    
+                    <!-- Items Table -->
+                    <h3 style="color: #2c3e50; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Items & Services</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin: 20px 0 30px;">
                         <thead>
-                            <tr>
-                                <th>Description</th>
-                                <th>Qty</th>
-                                <th>Unit Price</th>
-                                <th>Total (UGX)</th>
+                            <tr style="background: #2c3e50; color: white;">
+                                <th style="padding: 12px; text-align: left;">Item</th>
+                                <th style="padding: 12px; text-align: left;">Description</th>
+                                <th style="padding: 12px; text-align: center;">Qty</th>
+                                <th style="padding: 12px; text-align: right;">Rate (UGX)</th>
+                                <th style="padding: 12px; text-align: right;">Total (UGX)</th>
                             </tr>
                         </thead>
                         <tbody>
-        `;
-        
-        data.items.forEach(item => {
-            previewHTML += `
-                <tr>
-                    <td>${item.description}</td>
-                    <td>${item.quantity}</td>
-                    <td>${formatNumber(item.price)}</td>
-                    <td>${formatNumber(item.total)}</td>
-                </tr>
             `;
-        });
-        
-        previewHTML += `
-                        </tbody>
-                    </table>
-                </div>
-                
-                <div class="preview-totals">
-                    <table class="preview-totals-table">
-                        <tr>
-                            <td><strong>Subtotal:</strong></td>
-                            <td>${formatCurrency(data.subtotal)}</td>
-                        </tr>
-        `;
-        
-        if (data.applyTax) {
-            previewHTML += `
-                <tr>
-                    <td><strong>Tax (18%):</strong></td>
-                    <td>${formatCurrency(data.taxAmount)}</td>
-                </tr>
-            `;
-        }
-        
-        previewHTML += `
-                        <tr class="grand-total">
-                            <td><strong>GRAND TOTAL:</strong></td>
-                            <td>${formatCurrency(data.grandTotal)}</td>
-                        </tr>
-                    </table>
-                </div>
-        `;
-        
-        if (currentDocumentType === 'receipt') {
-            previewHTML += `
-                <div class="preview-section">
-                    <h3>Payment Details</h3>
-                    <p><strong>Payment Method:</strong> ${data.paymentMode}</p>
-                    ${data.paymentRef ? `<p><strong>Reference:</strong> ${data.paymentRef}</p>` : ''}
-                    <p><strong>Payment Date:</strong> ${data.date}</p>
-                </div>
-            `;
-        }
-        
-        if (data.notes) {
-            previewHTML += `
-                <div class="preview-section">
-                    <h3>Notes</h3>
-                    <p>${data.notes}</p>
-                </div>
-            `;
-        }
-        
-        if (data.paymentTerms) {
-            previewHTML += `
-                <div class="preview-section">
-                    <p><strong>Payment Terms:</strong> ${data.paymentTerms}</p>
-                </div>
-            `;
-        }
-        
-        // Add stamp and footer
-        previewHTML += `
-                <div style="position: relative; margin-top: 50px; padding-top: 20px; border-top: 1px solid #ccc;">
-                    <img src="https://i.ibb.co/8LFKMz6T/co-stamp-SAMANI.jpg" alt="Official Stamp" class="preview-stamp" style="max-width: 120px; opacity: 0.8; position: absolute; right: 20px; bottom: 10px;">
-                    <div class="preview-footer">
-                        <p><strong>Thank you for your business!</strong></p>
-                        <p>SAMANI CREATIONS LTD | +256-740-317419</p>
-                        <p>This is a computer-generated document.</p>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        previewContent.innerHTML = previewHTML;
-        previewModal.classList.add('active');
-    }
-    
-    // Generate and save PDF document
-    function generateAndSavePDF() {
-        if (!validateForm()) {
-            alert('Please fill in all required fields correctly.');
-            return;
-        }
-        
-        const data = collectFormData();
-        currentDocumentData = data;
-        
-        // Use html2canvas to capture the preview
-        html2canvas(previewContent, {
-            scale: 2,
-            useCORS: true,
-            logging: false
-        }).then(canvas => {
-            const imgData = canvas.toDataURL('image/png');
-            const pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = pdf.internal.pageSize.getHeight();
-            const imgWidth = pdfWidth - 40; // Margins
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
             
-            let heightLeft = imgHeight;
-            let position = 10;
-            
-            pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
-            heightLeft -= pdfHeight;
-            
-            // Add additional pages if content is too long
-            while (heightLeft >= 0) {
-                position = heightLeft - imgHeight;
-                pdf.addPage();
-                pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
-                heightLeft -= pdfHeight;
-            }
-            
-            // Save the PDF
-            const fileName = `${data.docType}_${data.docRef}.pdf`;
-            pdf.save(fileName);
-            
-            // Archive the document
-            archiveDocument(data);
-            
-            // Close modal if open
-            closeModal();
-        });
-    }
-    
-    // Archive document to localStorage
-    function archiveDocument(documentData) {
-        let archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
-        archivedDocs.unshift(documentData); // Add to beginning
-        
-        // Keep only last 50 documents
-        if (archivedDocs.length > 50) {
-            archivedDocs = archivedDocs.slice(0, 50);
-        }
-        
-        localStorage.setItem('samani_archived_docs', JSON.stringify(archivedDocs));
-        loadArchivedDocuments();
-    }
-    
-    // Load archived documents from localStorage
-    function loadArchivedDocuments() {
-        const archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
-        const documentsList = document.getElementById('documentsList');
-        
-        if (archivedDocs.length === 0) {
-            documentsList.innerHTML = '<p class="empty-message">No documents have been saved locally yet. Create your first document above.</p>';
-            return;
-        }
-        
-        let html = '';
-        archivedDocs.forEach((doc, index) => {
-            const badgeClass = `badge-${doc.docType}`;
-            const typeNames = { quote: 'Quotation', invoice: 'Invoice', receipt: 'Receipt' };
+            data.items.forEach(item => {
+                html += `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 12px;">${item.name}</td>
+                        <td style="padding: 12px;">${item.description || ''}</td>
+                        <td style="padding: 12px; text-align: center;">${item.quantity}</td>
+                        <td style="padding: 12px; text-align: right;">${formatCurrency(item.rate)}</td>
+                        <td style="padding: 12px; text-align: right;">${formatCurrency(item.total)}</td>
+                    </tr>
+                `;
+            });
             
             html += `
-                <div class="document-item">
-                    <div class="doc-info">
-                        <h4>${doc.projectName}</h4>
-                        <p><strong>Client:</strong> ${doc.clientName}</p>
-                        <p><strong>Ref:</strong> ${doc.docRef} | <strong>Date:</strong> ${doc.date}</p>
-                        <p><strong>Total:</strong> ${formatCurrency(doc.grandTotal)}</p>
-                        <span class="doc-type-badge ${badgeClass}">${typeNames[doc.docType]}</span>
+                        </tbody>
+                    </table>
+                    
+                    <!-- Payment Info for Receipts -->
+                    ${data.docType === 'receipt' ? `
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                        <h3 style="color: #2c3e50; margin-top: 0;">Payment Information</h3>
+                        <p><strong>Payment Mode:</strong> ${data.paymentMode}</p>
+                        <p><strong>Account/Reference:</strong> ${data.accountNumber}</p>
+                        ${data.invoiceRef !== 'N/A' ? `<p><strong>Related Invoice:</strong> ${data.invoiceRef}</p>` : ''}
+                        <p><strong>Payment Date:</strong> ${formattedDate}</p>
                     </div>
-                    <div class="doc-actions">
-                        <button class="btn-secondary" onclick="viewArchivedDocument(${index})">
-                            <i class="fas fa-eye"></i> View
-                        </button>
-                        <button class="btn-secondary" onclick="recreateArchivedDocument(${index})">
-                            <i class="fas fa-edit"></i> Recreate
-                        </button>
+                    ` : ''}
+                    
+                    <!-- Totals -->
+                    <div style="text-align: right; margin-top: 30px;">
+                        <div style="display: inline-block; text-align: left; min-width: 300px;">
+                            <p style="margin: 8px 0; font-size: 16px;">
+                                <span style="display: inline-block; width: 200px;">Subtotal:</span>
+                                <span style="font-weight: bold;">${formatCurrency(data.subtotal)}</span>
+                            </p>
+                            ${data.includeTax ? `
+                            <p style="margin: 8px 0; font-size: 16px;">
+                                <span style="display: inline-block; width: 200px;">Tax (18%):</span>
+                                <span style="font-weight: bold;">${formatCurrency(data.taxAmount)}</span>
+                            </p>
+                            ` : ''}
+                            <p style="margin: 15px 0; font-size: 20px; border-top: 2px solid #2c3e50; padding-top: 10px;">
+                                <span style="display: inline-block; width: 200px;">TOTAL AMOUNT:</span>
+                                <span style="font-weight: bold; color: #2c3e50;">${formatCurrency(data.grandTotal)}</span>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <!-- Notes -->
+                    ${data.notes !== 'No additional notes' ? `
+                    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+                        <h3 style="color: #2c3e50;">Notes</h3>
+                        <p>${data.notes.replace(/\n/g, '<br>')}</p>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Footer -->
+                    <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #2c3e50; text-align: center; color: #666; font-size: 14px;">
+                        <p>Thank you for choosing SAMANI CREATIONS LTD</p>
+                        <p>Phone: +256-740-317419 | Email: info@samanicreations.com</p>
+                        <p style="margin-top: 20px; font-style: italic;">This is a computer-generated document. No signature is required.</p>
                     </div>
                 </div>
             `;
-        });
-        
-        documentsList.innerHTML = html;
-    }
-    
-    // View an archived document
-    window.viewArchivedDocument = function(index) {
-        const archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
-        if (archivedDocs[index]) {
-            currentDocumentData = archivedDocs[index];
-            generatePreview();
+            
+            return html;
         }
-    };
-    
-    // Recreate an archived document in the form
-    window.recreateArchivedDocument = function(index) {
-        const archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
-        const doc = archivedDocs[index];
-        
-        if (doc) {
-            // Select the document type
-            selectDocumentType(doc.docType);
+
+        async function generatePDF() {
+            if (!validateForm()) return;
             
-            // Fill form fields
-            document.getElementById('date').value = doc.date || new Date().toISOString().split('T')[0];
-            document.getElementById('dueDate').value = doc.dueDate || '';
-            document.getElementById('clientName').value = doc.clientName || '';
-            document.getElementById('clientPhone').value = doc.clientPhone || '';
-            document.getElementById('projectName').value = doc.projectName || '';
-            document.getElementById('clientSite').value = doc.clientSite || '';
-            document.getElementById('paymentTerms').value = doc.paymentTerms || 'Net 14';
-            document.getElementById('notes').value = doc.notes || '';
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
             
-            if (doc.docType === 'receipt') {
-                document.getElementById('paymentMode').value = doc.paymentMode || '';
-                document.getElementById('paymentRef').value = doc.paymentRef || '';
-            }
+            const data = collectFormData();
+            const docTypeUpper = data.docType.toUpperCase();
             
-            // Fill items
-            itemsBody.innerHTML = '';
-            if (doc.items && doc.items.length > 0) {
-                doc.items.forEach(item => {
-                    const newRow = document.createElement('tr');
-                    newRow.innerHTML = `
-                        <td><input type="text" class="item-desc" value="${item.description || ''}" required></td>
-                        <td><input type="number" class="item-qty" value="${item.quantity || 1}" min="1" step="1" required></td>
-                        <td><input type="number" class="item-price" value="${item.price || 0}" min="0" step="1000" required></td>
-                        <td><input type="text" class="item-total" value="${formatNumber(item.total || 0)}" readonly></td>
-                        <td><button type="button" class="btn-remove-row"><i class="fas fa-trash"></i></button></td>
-                    `;
-                    itemsBody.appendChild(newRow);
+            try {
+                // Load the stamp image
+                const stampImg = new Image();
+                stampImg.crossOrigin = 'Anonymous';
+                stampImg.src = 'https://i.ibb.co/8LFKMz6T/co-stamp-SAMANI.jpg';
+                
+                await new Promise((resolve, reject) => {
+                    stampImg.onload = resolve;
+                    stampImg.onerror = reject;
                 });
-            } else {
-                addNewItemRow();
+                
+                // Add header
+                doc.setFontSize(20);
+                doc.setFont('helvetica', 'bold');
+                doc.text('SAMANI CREATIONS LTD', pageWidth / 2, 20, { align: 'center' });
+                
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'normal');
+                doc.text('Furniture • Interior Design • Woodwork', pageWidth / 2, 27, { align: 'center' });
+                
+                // Document title and reference
+                doc.setFontSize(16);
+                doc.setFont('helvetica', 'bold');
+                doc.text(docTypeUpper, pageWidth / 2, 40, { align: 'center' });
+                
+                doc.setFontSize(10);
+                doc.setFont('helvetica', 'normal');
+                doc.text(`Reference: ${data.docRef}`, 20, 55);
+                doc.text(`Date: ${new Date(data.date).toLocaleDateString('en-US')}`, pageWidth - 20, 55, { align: 'right' });
+                
+                if (data.dueDate !== 'N/A') {
+                    doc.text(`Due Date: ${new Date(data.dueDate).toLocaleDateString('en-US')}`, pageWidth - 20, 62, { align: 'right' });
+                }
+                
+                // Client information
+                doc.setFont('helvetica', 'bold');
+                doc.text('Bill To:', 20, 70);
+                doc.setFont('helvetica', 'normal');
+                doc.text(data.clientName, 20, 77);
+                doc.text(`Project: ${data.projectName}`, 20, 84);
+                if (data.clientAddress !== 'N/A') {
+                    doc.text(data.clientAddress, 20, 91);
+                }
+                doc.text(`Phone: ${data.clientPhone}`, 20, 98);
+                if (data.clientEmail !== 'N/A') {
+                    doc.text(`Email: ${data.clientEmail}`, 20, 105);
+                }
+                
+                // Items table
+                let y = 120;
+                doc.setFont('helvetica', 'bold');
+                doc.text('Item', 20, y);
+                doc.text('Description', 70, y);
+                doc.text('Qty', 130, y);
+                doc.text('Rate', 145, y);
+                doc.text('Total', 170, y);
+                
+                y += 10;
+                doc.setFont('helvetica', 'normal');
+                
+                data.items.forEach((item, index) => {
+                    if (y > 250 && index < data.items.length - 1) {
+                        doc.addPage();
+                        y = 20;
+                    }
+                    
+                    doc.text(item.name.substring(0, 30), 20, y);
+                    
+                    // Handle description (split if too long)
+                    const descLines = doc.splitTextToSize(item.description || '', 40);
+                    descLines.forEach((line, i) => {
+                        doc.text(line, 70, y + (i * 5));
+                    });
+                    
+                    const descHeight = Math.max(descLines.length * 5, 10);
+                    
+                    doc.text(item.quantity.toString(), 130, y);
+                    doc.text(formatCurrency(item.rate), 145, y);
+                    doc.text(formatCurrency(item.total), 170, y);
+                    
+                    y += Math.max(descHeight, 10);
+                });
+                
+                // Totals
+                doc.setFont('helvetica', 'bold');
+                doc.text('Subtotal:', 145, y + 10);
+                doc.text(formatCurrency(data.subtotal), 170, y + 10);
+                
+                if (data.includeTax) {
+                    doc.text('Tax (18%):', 145, y + 20);
+                    doc.text(formatCurrency(data.taxAmount), 170, y + 20);
+                    y += 10;
+                }
+                
+                doc.text('TOTAL:', 145, y + 30);
+                doc.text(formatCurrency(data.grandTotal), 170, y + 30);
+                
+                // Add the stamp
+                const stampWidth = 40;
+                const stampHeight = 40;
+                const stampX = pageWidth - stampWidth - 20;
+                const stampY = pageHeight - stampHeight - 20;
+                
+                doc.addImage(stampImg, 'JPEG', stampX, stampY, stampWidth, stampHeight);
+                
+                // Footer
+                doc.setFontSize(8);
+                doc.setFont('helvetica', 'normal');
+                doc.text('SAMANI CREATIONS LTD | Phone: +256-740-317419', pageWidth / 2, pageHeight - 10, { align: 'center' });
+                
+                // Save PDF
+                const fileName = `${data.docType}_${data.docRef}.pdf`;
+                doc.save(fileName);
+                
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                alert('Error generating PDF. Please try again.');
             }
-            
-            // Set tax checkbox
-            applyTaxCheckbox.checked = doc.applyTax || false;
-            
-            // Recalculate and update
-            updateRemoveButtons();
-            recalculateTotals();
-            
-            // Switch to create tab
-            switchTab('create');
         }
-    };
-    
-    // Clear all archived documents
-    function clearAllArchivedDocuments() {
-        if (confirm('Are you sure you want to clear ALL locally saved documents? This cannot be undone.')) {
-            localStorage.removeItem('samani_archived_docs');
-            localStorage.removeItem('samani_doc_counter');
-            documentCounter = 1000;
-            loadArchivedDocuments();
-            alert('All locally saved documents have been cleared.');
+
+        function clearForm() {
+            if (confirm('Are you sure you want to clear the entire form? This action cannot be undone.')) {
+                // Reset form inputs
+                document.getElementById('documentForm').reset();
+                
+                // Reset items table
+                const itemsBody = document.getElementById('itemsBody');
+                itemsBody.innerHTML = '';
+                addNewItemRow();
+                
+                // Reset dates
+                const today = new Date().toISOString().split('T')[0];
+                document.getElementById('date').value = today;
+                
+                const dueDate = new Date();
+                dueDate.setDate(dueDate.getDate() + 14);
+                document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
+                
+                // Reset document type to quote
+                document.querySelectorAll('.doc-card').forEach(card => card.classList.remove('active'));
+                document.querySelector('.doc-card[data-type="quote"]').classList.add('active');
+                currentDocumentType = 'quote';
+                document.getElementById('documentTypeLabel').textContent = 'Quotation';
+                document.getElementById('receiptFields').style.display = 'none';
+                
+                // Reset totals
+                calculateTotals();
+                
+                alert('Form cleared successfully.');
+            }
         }
-    }
-    
-    // Close the preview modal
-    function closeModal() {
-        previewModal.classList.remove('active');
-    }
-    
-    // Download PDF from preview (called from modal button)
-    window.downloadPDFFromPreview = function() {
-        if (currentDocumentData) {
-            generateAndSavePDF();
-        }
-    };
-    
-    // Make closeModal available globally for modal button
-    window.closeModal = closeModal;
-});
+
+        // Make functions available globally
+        window.calculateItemTotal = calculateItemTotal;
+        window.removeItemRow = removeItemRow;
+    </script>
+</body>
+</html>
