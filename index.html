@@ -1,346 +1,705 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <!-- [The rest of the HEAD section remains exactly the same as in the previous code] -->
-    <style>
-        /* [All CSS styles remain exactly the same as in the previous code] */
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- [The entire HTML structure remains the same up to the "Financial Summary" section] -->
-
-        <!-- Totals Section - MODIFIED -->
-        <div class="form-section totals-section">
-            <h4><i class="fas fa-calculator"></i> Financial Summary</h4>
-            <!-- New Tax Rate Input Row -->
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="taxRateInput">Tax Rate (%)</label>
-                    <input type="number" id="taxRateInput" name="taxRateInput" value="0" min="0" max="100" step="0.01" style="width: 100px;">
-                    <span style="margin-left: 10px; color: #666;">Enter 0 for no tax</span>
+// Main Application Script
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize variables
+    let currentDocumentType = '';
+    let currentDocumentData = null;
+    let documentCounter = localStorage.getItem('samani_doc_counter') || 1000;
+    
+    // DOM Elements
+    const navTabs = document.querySelectorAll('.nav-tab');
+    const tabContents = document.querySelectorAll('.tab-content');
+    const docCards = document.querySelectorAll('.doc-card');
+    const formContainer = document.getElementById('formContainer');
+    const documentForm = document.getElementById('documentForm');
+    const formTitle = document.getElementById('formTitle');
+    const docTypeInput = document.getElementById('docType');
+    const docRefInput = document.getElementById('docRef');
+    const receiptFields = document.getElementById('receiptFields');
+    const applyTaxCheckbox = document.getElementById('applyTax');
+    const taxRow = document.getElementById('taxRow');
+    const itemsBody = document.getElementById('itemsBody');
+    const addItemBtn = document.getElementById('addItemBtn');
+    const previewBtn = document.getElementById('previewBtn');
+    const generatePdfBtn = document.getElementById('generatePdfBtn');
+    const clearFormBtn = document.getElementById('clearFormBtn');
+    const previewModal = document.getElementById('previewModal');
+    const previewContent = document.getElementById('previewContent');
+    const modalClose = document.querySelector('.modal-close');
+    const documentsList = document.getElementById('documentsList');
+    const clearArchiveBtn = document.getElementById('clearArchiveBtn');
+    
+    // Initialize the application
+    initializeApp();
+    
+    // Function to initialize the application
+    function initializeApp() {
+        // Set today's date
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('date').value = today;
+        
+        // Set default due date (14 days from today)
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 14);
+        document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
+        
+        // Set default payment terms
+        document.getElementById('paymentTerms').value = 'Net 14';
+        
+        // Add event listeners
+        setupEventListeners();
+        
+        // Load archived documents
+        loadArchivedDocuments();
+        
+        // Initialize item calculations
+        recalculateTotals();
+    }
+    
+    // Set up all event listeners
+    function setupEventListeners() {
+        // Navigation tabs
+        navTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabId = tab.dataset.tab;
+                switchTab(tabId);
+            });
+        });
+        
+        // Document type selection
+        docCards.forEach(card => {
+            card.querySelector('.btn-select').addEventListener('click', function(e) {
+                e.stopPropagation();
+                const type = this.parentElement.dataset.type;
+                selectDocumentType(type);
+            });
+        });
+        
+        // Item table events
+        addItemBtn.addEventListener('click', addNewItemRow);
+        itemsBody.addEventListener('input', function(e) {
+            if (e.target.classList.contains('item-qty') || 
+                e.target.classList.contains('item-price')) {
+                updateItemTotal(e.target);
+            }
+            recalculateTotals();
+        });
+        
+        itemsBody.addEventListener('click', function(e) {
+            if (e.target.closest('.btn-remove-row')) {
+                const btn = e.target.closest('.btn-remove-row');
+                if (!btn.disabled) {
+                    removeItemRow(btn);
+                }
+            }
+        });
+        
+        // Tax checkbox
+        applyTaxCheckbox.addEventListener('change', recalculateTotals);
+        
+        // Form buttons
+        previewBtn.addEventListener('click', generatePreview);
+        generatePdfBtn.addEventListener('click', generateAndSavePDF);
+        clearFormBtn.addEventListener('click', clearForm);
+        
+        // Modal
+        modalClose.addEventListener('click', closeModal);
+        previewModal.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+        
+        // Archive
+        clearArchiveBtn.addEventListener('click', clearAllArchivedDocuments);
+        
+        // Form submission
+        documentForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+        });
+    }
+    
+    // Switch between tabs
+    function switchTab(tabId) {
+        // Update active tab
+        navTabs.forEach(tab => tab.classList.remove('active'));
+        document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+        
+        // Show active content
+        tabContents.forEach(content => {
+            content.classList.remove('active');
+            if (content.id === `${tabId}Tab`) {
+                content.classList.add('active');
+            }
+        });
+    }
+    
+    // Select document type and show form
+    function selectDocumentType(type) {
+        currentDocumentType = type;
+        
+        // Update UI
+        document.querySelector('.document-selector').style.display = 'none';
+        formContainer.style.display = 'block';
+        
+        // Set form title
+        const titles = {
+            'quote': 'Create Quotation',
+            'invoice': 'Create Invoice',
+            'receipt': 'Create Receipt'
+        };
+        formTitle.textContent = titles[type];
+        
+        // Set document type in hidden field
+        docTypeInput.value = type;
+        
+        // Generate and set reference number
+        generateReferenceNumber(type);
+        
+        // Show/hide receipt fields
+        if (type === 'receipt') {
+            receiptFields.style.display = 'block';
+            document.getElementById('paymentMode').required = true;
+        } else {
+            receiptFields.style.display = 'none';
+            document.getElementById('paymentMode').required = false;
+        }
+        
+        // Scroll to form
+        formContainer.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // Generate a unique reference number
+    function generateReferenceNumber(type) {
+        const prefixes = {
+            'quote': 'QT',
+            'invoice': 'INV',
+            'receipt': 'RCT'
+        };
+        
+        documentCounter++;
+        localStorage.setItem('samani_doc_counter', documentCounter);
+        
+        const prefix = prefixes[type] || 'DOC';
+        const refNumber = documentCounter.toString().padStart(4, '0');
+        const ref = `SAMANI_UG-${prefix}-${refNumber}`;
+        
+        docRefInput.value = ref;
+        return ref;
+    }
+    
+    // Add a new item row to the table
+    function addNewItemRow() {
+        const newRow = document.createElement('tr');
+        newRow.innerHTML = `
+            <td><input type="text" class="item-desc" placeholder="Item description" required></td>
+            <td><input type="number" class="item-qty" value="1" min="1" step="1" required></td>
+            <td><input type="number" class="item-price" value="0" min="0" step="1000" required></td>
+            <td><input type="text" class="item-total" value="0" readonly></td>
+            <td><button type="button" class="btn-remove-row"><i class="fas fa-trash"></i></button></td>
+        `;
+        
+        itemsBody.appendChild(newRow);
+        
+        // Update remove buttons (disable if only one row)
+        updateRemoveButtons();
+        
+        // Recalculate totals
+        recalculateTotals();
+    }
+    
+    // Remove an item row
+    function removeItemRow(button) {
+        const row = button.closest('tr');
+        const rows = itemsBody.querySelectorAll('tr');
+        
+        if (rows.length > 1) {
+            row.remove();
+            updateRemoveButtons();
+            recalculateTotals();
+        }
+    }
+    
+    // Update remove buttons state (disable if only one row)
+    function updateRemoveButtons() {
+        const rows = itemsBody.querySelectorAll('tr');
+        const removeButtons = itemsBody.querySelectorAll('.btn-remove-row');
+        
+        removeButtons.forEach(btn => {
+            btn.disabled = rows.length <= 1;
+        });
+    }
+    
+    // Update total for a single item row
+    function updateItemTotal(input) {
+        const row = input.closest('tr');
+        const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+        const price = parseFloat(row.querySelector('.item-price').value) || 0;
+        const total = qty * price;
+        
+        row.querySelector('.item-total').value = formatNumber(total);
+    }
+    
+    // Recalculate all totals (subtotal, tax, grand total)
+    function recalculateTotals() {
+        const rows = itemsBody.querySelectorAll('tr');
+        let subtotal = 0;
+        
+        rows.forEach(row => {
+            const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+            const price = parseFloat(row.querySelector('.item-price').value) || 0;
+            subtotal += qty * price;
+        });
+        
+        const applyTax = applyTaxCheckbox.checked;
+        const taxRate = 0.18; // 18%
+        const taxAmount = applyTax ? subtotal * taxRate : 0;
+        const grandTotal = subtotal + taxAmount;
+        
+        // Update display
+        document.getElementById('displaySubtotal').textContent = formatCurrency(subtotal);
+        document.getElementById('displayTax').textContent = formatCurrency(taxAmount);
+        document.getElementById('displayGrandTotal').textContent = formatCurrency(grandTotal);
+        
+        // Show/hide tax row
+        taxRow.style.display = applyTax ? 'block' : 'none';
+    }
+    
+    // Format number with commas (for display)
+    function formatNumber(num) {
+        return num.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+    
+    // Format as currency
+    function formatCurrency(amount) {
+        return formatNumber(amount) + ' UGX';
+    }
+    
+    // Clear the form and reset to document selection
+    function clearForm() {
+        if (confirm('Clear the current form and return to document selection?')) {
+            documentForm.reset();
+            itemsBody.innerHTML = `
+                <tr>
+                    <td><input type="text" class="item-desc" placeholder="e.g., Custom Wooden Table" required></td>
+                    <td><input type="number" class="item-qty" value="1" min="1" step="1" required></td>
+                    <td><input type="number" class="item-price" value="0" min="0" step="1000" required></td>
+                    <td><input type="text" class="item-total" value="0" readonly></td>
+                    <td><button type="button" class="btn-remove-row" disabled><i class="fas fa-trash"></i></button></td>
+                </tr>
+            `;
+            
+            // Reset dates and defaults
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('date').value = today;
+            
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + 14);
+            document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
+            
+            document.getElementById('paymentTerms').value = 'Net 14';
+            applyTaxCheckbox.checked = false;
+            
+            // Hide form, show document selector
+            formContainer.style.display = 'none';
+            document.querySelector('.document-selector').style.display = 'block';
+            
+            // Reset calculations
+            recalculateTotals();
+        }
+    }
+    
+    // Validate form before proceeding
+    function validateForm() {
+        const requiredFields = documentForm.querySelectorAll('[required]');
+        let isValid = true;
+        
+        // Check required fields
+        requiredFields.forEach(field => {
+            if (!field.value.trim()) {
+                field.style.borderColor = 'var(--danger-color)';
+                isValid = false;
+            } else {
+                field.style.borderColor = '';
+            }
+        });
+        
+        // Check if at least one item has description and price > 0
+        const items = document.querySelectorAll('#itemsBody tr');
+        let hasValidItems = false;
+        
+        items.forEach(row => {
+            const desc = row.querySelector('.item-desc').value.trim();
+            const price = parseFloat(row.querySelector('.item-price').value) || 0;
+            if (desc && price > 0) {
+                hasValidItems = true;
+            }
+        });
+        
+        if (!hasValidItems) {
+            alert('Please add at least one item with a description and price greater than 0.');
+            isValid = false;
+        }
+        
+        return isValid;
+    }
+    
+    // Collect form data into an object
+    function collectFormData() {
+        const formData = new FormData(documentForm);
+        const data = Object.fromEntries(formData.entries());
+        
+        // Collect items
+        const items = [];
+        document.querySelectorAll('#itemsBody tr').forEach(row => {
+            const desc = row.querySelector('.item-desc').value.trim();
+            if (desc) {
+                items.push({
+                    description: desc,
+                    quantity: parseFloat(row.querySelector('.item-qty').value) || 1,
+                    price: parseFloat(row.querySelector('.item-price').value) || 0,
+                    total: parseFloat(row.querySelector('.item-total').value.replace(/,/g, '')) || 0
+                });
+            }
+        });
+        
+        data.items = items;
+        data.applyTax = applyTaxCheckbox.checked;
+        data.subtotal = parseFloat(document.getElementById('displaySubtotal').textContent.replace(/[^0-9.-]+/g, '')) || 0;
+        data.taxAmount = parseFloat(document.getElementById('displayTax').textContent.replace(/[^0-9.-]+/g, '')) || 0;
+        data.grandTotal = parseFloat(document.getElementById('displayGrandTotal').textContent.replace(/[^0-9.-]+/g, '')) || 0;
+        data.createdAt = new Date().toISOString();
+        data.docType = currentDocumentType;
+        
+        return data;
+    }
+    
+    // Generate HTML preview of the document
+    function generatePreview() {
+        if (!validateForm()) {
+            alert('Please fill in all required fields correctly.');
+            return;
+        }
+        
+        currentDocumentData = collectFormData();
+        const data = currentDocumentData;
+        
+        // Generate preview HTML
+        let previewHTML = `
+            <div class="preview-document">
+                <div class="preview-header">
+                    <div class="preview-company">
+                        <h1>SAMANI CREATIONS LTD</h1>
+                        <p><strong>Furniture • Interior Design • Woodwork</strong></p>
+                        <p><i class="fas fa-phone"></i> +256-740-317419</p>
+                    </div>
+                    <div class="preview-logo-container">
+                        <img src="https://i.ibb.co/H1wL4ph/official-samani-logo.png" alt="SAMANI CREATIONS" class="preview-logo">
+                    </div>
+                </div>
+                
+                <div class="preview-doc-title">
+                    <h2>${currentDocumentType.toUpperCase()}</h2>
+                    <p class="ref"><strong>Reference:</strong> ${data.docRef}</p>
+                    <p><strong>Date:</strong> ${data.date} ${data.dueDate ? ` | <strong>Due Date:</strong> ${data.dueDate}` : ''}</p>
+                </div>
+                
+                <div class="preview-section">
+                    <h3>Bill To:</h3>
+                    <p><strong>${data.clientName}</strong></p>
+                    <p>${data.projectName}</p>
+                    ${data.clientPhone ? `<p>Phone: ${data.clientPhone}</p>` : ''}
+                    ${data.clientSite ? `<p>Location: ${data.clientSite}</p>` : ''}
+                </div>
+                
+                <div class="preview-section">
+                    <h3>Items & Services</h3>
+                    <table class="preview-items">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Qty</th>
+                                <th>Unit Price</th>
+                                <th>Total (UGX)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        data.items.forEach(item => {
+            previewHTML += `
+                <tr>
+                    <td>${item.description}</td>
+                    <td>${item.quantity}</td>
+                    <td>${formatNumber(item.price)}</td>
+                    <td>${formatNumber(item.total)}</td>
+                </tr>
+            `;
+        });
+        
+        previewHTML += `
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="preview-totals">
+                    <table class="preview-totals-table">
+                        <tr>
+                            <td><strong>Subtotal:</strong></td>
+                            <td>${formatCurrency(data.subtotal)}</td>
+                        </tr>
+        `;
+        
+        if (data.applyTax) {
+            previewHTML += `
+                <tr>
+                    <td><strong>Tax (18%):</strong></td>
+                    <td>${formatCurrency(data.taxAmount)}</td>
+                </tr>
+            `;
+        }
+        
+        previewHTML += `
+                        <tr class="grand-total">
+                            <td><strong>GRAND TOTAL:</strong></td>
+                            <td>${formatCurrency(data.grandTotal)}</td>
+                        </tr>
+                    </table>
+                </div>
+        `;
+        
+        if (currentDocumentType === 'receipt') {
+            previewHTML += `
+                <div class="preview-section">
+                    <h3>Payment Details</h3>
+                    <p><strong>Payment Method:</strong> ${data.paymentMode}</p>
+                    ${data.paymentRef ? `<p><strong>Reference:</strong> ${data.paymentRef}</p>` : ''}
+                    <p><strong>Payment Date:</strong> ${data.date}</p>
+                </div>
+            `;
+        }
+        
+        if (data.notes) {
+            previewHTML += `
+                <div class="preview-section">
+                    <h3>Notes</h3>
+                    <p>${data.notes}</p>
+                </div>
+            `;
+        }
+        
+        if (data.paymentTerms) {
+            previewHTML += `
+                <div class="preview-section">
+                    <p><strong>Payment Terms:</strong> ${data.paymentTerms}</p>
+                </div>
+            `;
+        }
+        
+        // Add stamp and footer
+        previewHTML += `
+                <div style="position: relative; margin-top: 50px; padding-top: 20px; border-top: 1px solid #ccc;">
+                    <img src="https://i.ibb.co/8LFKMz6T/co-stamp-SAMANI.jpg" alt="Official Stamp" class="preview-stamp" style="max-width: 120px; opacity: 0.8; position: absolute; right: 20px; bottom: 10px;">
+                    <div class="preview-footer">
+                        <p><strong>Thank you for your business!</strong></p>
+                        <p>SAMANI CREATIONS LTD | +256-740-317419</p>
+                        <p>This is a computer-generated document.</p>
+                    </div>
                 </div>
             </div>
-            <!-- Totals Display Rows -->
-            <div class="total-row">
-                <span>Subtotal:</span>
-                <span id="subtotalDisplay">0 UGX</span>
-            </div>
-            <div class="total-row">
-                <span>Tax Amount:</span>
-                <span id="taxDisplay">0 UGX</span>
-            </div>
-            <div class="total-row grand-total">
-                <span>GRAND TOTAL:</span>
-                <span id="grandTotalDisplay">0 UGX</span>
-            </div>
-        </div>
-
-        <!-- [The rest of the HTML remains exactly the same] -->
-    </div>
-
-    <!-- FONT AWESOME FOR ICONS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-
-    <!-- MAIN APPLICATION JAVASCRIPT -->
-    <script>
-        // ============================
-        // APPLICATION STATE & SETUP
-        // ============================
-        let currentDocumentType = '';
-        let currentDocumentData = null;
-        let allDocuments = JSON.parse(localStorage.getItem('samani_documents')) || [];
-
-        // Initialize the application when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeApp();
-            loadDocumentArchive();
+        `;
+        
+        previewContent.innerHTML = previewHTML;
+        previewModal.classList.add('active');
+    }
+    
+    // Generate and save PDF document
+    function generateAndSavePDF() {
+        if (!validateForm()) {
+            alert('Please fill in all required fields correctly.');
+            return;
+        }
+        
+        const data = collectFormData();
+        currentDocumentData = data;
+        
+        // Use html2canvas to capture the preview
+        html2canvas(previewContent, {
+            scale: 2,
+            useCORS: true,
+            logging: false
+        }).then(canvas => {
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            const imgWidth = pdfWidth - 40; // Margins
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            
+            let heightLeft = imgHeight;
+            let position = 10;
+            
+            pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+            heightLeft -= pdfHeight;
+            
+            // Add additional pages if content is too long
+            while (heightLeft >= 0) {
+                position = heightLeft - imgHeight;
+                pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+                heightLeft -= pdfHeight;
+            }
+            
+            // Save the PDF
+            const fileName = `${data.docType}_${data.docRef}.pdf`;
+            pdf.save(fileName);
+            
+            // Archive the document
+            archiveDocument(data);
+            
+            // Close modal if open
+            closeModal();
         });
-
-        // ============================
-        // INITIALIZATION FUNCTIONS
-        // ============================
-        function initializeApp() {
-            setupEventListeners();
-            setupDefaultDates();
-            addFirstItemRow();
+    }
+    
+    // Archive document to localStorage
+    function archiveDocument(documentData) {
+        let archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
+        archivedDocs.unshift(documentData); // Add to beginning
+        
+        // Keep only last 50 documents
+        if (archivedDocs.length > 50) {
+            archivedDocs = archivedDocs.slice(0, 50);
         }
-
-        function setupEventListeners() {
-            // [All existing event listeners remain the same]
-
-            // NEW: Add listener for tax rate input
-            document.getElementById('taxRateInput').addEventListener('input', calculateDocumentTotals);
+        
+        localStorage.setItem('samani_archived_docs', JSON.stringify(archivedDocs));
+        loadArchivedDocuments();
+    }
+    
+    // Load archived documents from localStorage
+    function loadArchivedDocuments() {
+        const archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
+        const documentsList = document.getElementById('documentsList');
+        
+        if (archivedDocs.length === 0) {
+            documentsList.innerHTML = '<p class="empty-message">No documents have been saved locally yet. Create your first document above.</p>';
+            return;
         }
-
-        function setupDefaultDates() {
-            // [This function remains the same]
-        }
-
-        // ============================
-        // DOCUMENT CREATION & FORM HANDLING
-        // ============================
-        function createNewDocument(type) {
-            // [This function remains the same until the end]
-        }
-
-        function generateReferenceNumber(type) {
-            // [This function remains the same]
-        }
-
-        function cancelForm() {
-            // [This function remains the same]
-        }
-
-        // ============================
-        // ITEMS TABLE MANAGEMENT
-        // ============================
-        function addFirstItemRow() {
-            // [This function remains the same]
-        }
-
-        function resetItemsTable() {
-            // [This function remains the same]
-        }
-
-        function addNewItemRow() {
-            // [This function remains the same]
-        }
-
-        function removeItemRow(button) {
-            // [This function remains the same]
-        }
-
-        function calculateItemTotal(inputElement) {
-            // [This function remains the same]
-        }
-
-        // MODIFIED FUNCTION: Now calculates tax based on user input
-        function calculateDocumentTotals() {
-            const rows = document.querySelectorAll('#itemsBody tr');
-            let subtotal = 0;
+        
+        let html = '';
+        archivedDocs.forEach((doc, index) => {
+            const badgeClass = `badge-${doc.docType}`;
+            const typeNames = { quote: 'Quotation', invoice: 'Invoice', receipt: 'Receipt' };
             
-            rows.forEach(row => {
-                const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-                const rate = parseFloat(row.querySelector('.item-rate').value) || 0;
-                subtotal += qty * rate;
-            });
-            
-            // Get tax rate from user input (default is 0)
-            const taxRateInput = document.getElementById('taxRateInput');
-            const taxRate = parseFloat(taxRateInput.value) || 0;
-            
-            // Calculate tax amount and grand total
-            const taxAmount = subtotal * (taxRate / 100);
-            const grandTotal = subtotal + taxAmount;
-            
-            // Update display
-            document.getElementById('subtotalDisplay').textContent = formatCurrency(subtotal);
-            document.getElementById('taxDisplay').textContent = formatCurrency(taxAmount);
-            document.getElementById('grandTotalDisplay').textContent = formatCurrency(grandTotal);
-            
-            return { 
-                subtotal, 
-                taxRate,  // Now includes the rate
-                taxAmount, 
-                grandTotal 
-            };
-        }
-
-        // ============================
-        // PREVIEW & PDF GENERATION
-        // ============================
-        function validateForm() {
-            // [This function remains the same]
-        }
-
-        function collectFormData() {
-            const formData = new FormData(document.getElementById('documentForm'));
-            const data = Object.fromEntries(formData.entries());
-            
-            // Collect items
-            const items = [];
-            document.querySelectorAll('#itemsBody tr').forEach(row => {
-                const name = row.querySelector('.item-name').value.trim();
-                if (name) {
-                    items.push({
-                        name: name,
-                        description: row.querySelector('.item-desc').value.trim(),
-                        quantity: parseFloat(row.querySelector('.item-qty').value) || 1,
-                        rate: parseFloat(row.querySelector('.item-rate').value) || 0,
-                        total: parseFloat(row.querySelector('.item-total').value.replace(/[^0-9.-]+/g, '')) || 0
-                    });
-                }
-            });
-            
-            // Get totals including tax rate
-            const totals = calculateDocumentTotals();
-            
-            return {
-                ...data,
-                items: items,
-                subtotal: totals.subtotal,
-                taxRate: totals.taxRate,      // Store the tax rate
-                taxAmount: totals.taxAmount,
-                grandTotal: totals.grandTotal,
-                createdAt: new Date().toISOString(),
-                status: 'created'
-            };
-        }
-
-        function previewDocument() {
-            // [This function remains the same]
-        }
-
-        // MODIFIED: Updated to show conditional tax information
-        function generatePreviewHTML(doc) {
-            const type = doc.docType.toUpperCase();
-            const stampUrl = 'https://i.ibb.co/8LFKMz6T/co-stamp-SAMANI.jpg';
-            
-            let previewHTML = `
-                <div class="pdf-preview">
-                    <!-- [Header and document info sections remain the same] -->
-                    
-                    <div class="pdf-totals">
-                        <table class="pdf-totals-table">
-                            <tr>
-                                <td><strong>Subtotal:</strong></td>
-                                <td>${formatCurrency(doc.subtotal)}</td>
-                            </tr>`;
-            
-            // Conditionally show tax row only if tax rate > 0
-            if (doc.taxRate > 0) {
-                previewHTML += `
-                            <tr>
-                                <td><strong>Tax (${doc.taxRate}%):</strong></td>
-                                <td>${formatCurrency(doc.taxAmount)}</td>
-                            </tr>`;
-            }
-            
-            previewHTML += `
-                            <tr style="font-size: 18px; font-weight: bold;">
-                                <td><strong>GRAND TOTAL:</strong></td>
-                                <td>${formatCurrency(doc.grandTotal)}</td>
-                            </tr>
-                        </table>
+            html += `
+                <div class="document-item">
+                    <div class="doc-info">
+                        <h4>${doc.projectName}</h4>
+                        <p><strong>Client:</strong> ${doc.clientName}</p>
+                        <p><strong>Ref:</strong> ${doc.docRef} | <strong>Date:</strong> ${doc.date}</p>
+                        <p><strong>Total:</strong> ${formatCurrency(doc.grandTotal)}</p>
+                        <span class="doc-type-badge ${badgeClass}">${typeNames[doc.docType]}</span>
                     </div>
-                    
-                    <!-- [Rest of the preview HTML remains the same] -->
-                </div>`;
-            
-            document.getElementById('previewContent').innerHTML = previewHTML;
+                    <div class="doc-actions">
+                        <button class="btn-secondary" onclick="viewArchivedDocument(${index})">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                        <button class="btn-secondary" onclick="recreateArchivedDocument(${index})">
+                            <i class="fas fa-edit"></i> Recreate
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        documentsList.innerHTML = html;
+    }
+    
+    // View an archived document
+    window.viewArchivedDocument = function(index) {
+        const archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
+        if (archivedDocs[index]) {
+            currentDocumentData = archivedDocs[index];
+            generatePreview();
         }
-
-        async function generatePdfFromForm() {
-            // [This function remains the same]
-        }
-
-        // MODIFIED: Updated PDF generation to handle conditional tax
-        async function generateAndDownloadPdf(doc) {
-            const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pageWidth = pdf.internal.pageSize.getWidth();
-            const pageHeight = pdf.internal.pageSize.getHeight();
-            const margin = 20;
-            let yPos = margin;
+    };
+    
+    // Recreate an archived document in the form
+    window.recreateArchivedDocument = function(index) {
+        const archivedDocs = JSON.parse(localStorage.getItem('samani_archived_docs')) || [];
+        const doc = archivedDocs[index];
+        
+        if (doc) {
+            // Select the document type
+            selectDocumentType(doc.docType);
             
-            // [Logo, header, and document info sections remain the same]
+            // Fill form fields
+            document.getElementById('date').value = doc.date || new Date().toISOString().split('T')[0];
+            document.getElementById('dueDate').value = doc.dueDate || '';
+            document.getElementById('clientName').value = doc.clientName || '';
+            document.getElementById('clientPhone').value = doc.clientPhone || '';
+            document.getElementById('projectName').value = doc.projectName || '';
+            document.getElementById('clientSite').value = doc.clientSite || '';
+            document.getElementById('paymentTerms').value = doc.paymentTerms || 'Net 14';
+            document.getElementById('notes').value = doc.notes || '';
             
-            yPos += 5;
-            pdf.line(margin, yPos, pageWidth - margin, yPos);
-            yPos += 10;
-            
-            // Totals - UPDATED for conditional tax display
-            pdf.text('Subtotal:', pageWidth - margin - 50, yPos);
-            pdf.text(formatCurrency(doc.subtotal), pageWidth - margin, yPos, { align: 'right' });
-            
-            // Only show tax if rate > 0
-            if (doc.taxRate > 0) {
-                yPos += 7;
-                pdf.text(`Tax (${doc.taxRate}%):`, pageWidth - margin - 50, yPos);
-                pdf.text(formatCurrency(doc.taxAmount), pageWidth - margin, yPos, { align: 'right' });
+            if (doc.docType === 'receipt') {
+                document.getElementById('paymentMode').value = doc.paymentMode || '';
+                document.getElementById('paymentRef').value = doc.paymentRef || '';
             }
             
-            yPos += 7;
-            pdf.setFont('helvetica', 'bold');
-            pdf.text('GRAND TOTAL:', pageWidth - margin - 50, yPos);
-            pdf.text(formatCurrency(doc.grandTotal), pageWidth - margin, yPos, { align: 'right' });
+            // Fill items
+            itemsBody.innerHTML = '';
+            if (doc.items && doc.items.length > 0) {
+                doc.items.forEach(item => {
+                    const newRow = document.createElement('tr');
+                    newRow.innerHTML = `
+                        <td><input type="text" class="item-desc" value="${item.description || ''}" required></td>
+                        <td><input type="number" class="item-qty" value="${item.quantity || 1}" min="1" step="1" required></td>
+                        <td><input type="number" class="item-price" value="${item.price || 0}" min="0" step="1000" required></td>
+                        <td><input type="text" class="item-total" value="${formatNumber(item.total || 0)}" readonly></td>
+                        <td><button type="button" class="btn-remove-row"><i class="fas fa-trash"></i></button></td>
+                    `;
+                    itemsBody.appendChild(newRow);
+                });
+            } else {
+                addNewItemRow();
+            }
             
-            // [Rest of the PDF generation function remains the same]
-        }
-
-        function getImageData(url) {
-            // [This function remains the same]
-        }
-
-        function downloadPdfFromPreview() {
-            // [This function remains the same]
-        }
-
-        function printPreview() {
-            // [This function remains the same]
-        }
-
-        function closeModal() {
-            // [This function remains the same]
-        }
-
-        // ============================
-        // DOCUMENT ARCHIVE MANAGEMENT
-        // ============================
-        function saveDocumentToArchive(doc) {
-            // [This function remains the same]
-        }
-
-        function loadDocumentArchive() {
-            // [This function remains the same]
-        }
-
-        function viewArchivedDocument(index) {
-            // [This function remains the same]
-        }
-
-        function recreateDocument(index) {
-            const doc = allDocuments[index];
+            // Set tax checkbox
+            applyTaxCheckbox.checked = doc.applyTax || false;
+            
+            // Recalculate and update
+            updateRemoveButtons();
+            recalculateTotals();
             
             // Switch to create tab
             switchTab('create');
-            
-            // Set document type and trigger form
-            createNewDocument(doc.docType);
-            
-            // Populate form fields
-            setTimeout(() => {
-                // [All existing field population remains the same]
-                
-                // NEW: Set the tax rate
-                document.getElementById('taxRateInput').value = doc.taxRate || 0;
-                
-                // [Rest of the recreation logic remains the same]
-            }, 100);
         }
-
-        function deleteArchivedDocument(index) {
-            // [This function remains the same]
+    };
+    
+    // Clear all archived documents
+    function clearAllArchivedDocuments() {
+        if (confirm('Are you sure you want to clear ALL locally saved documents? This cannot be undone.')) {
+            localStorage.removeItem('samani_archived_docs');
+            localStorage.removeItem('samani_doc_counter');
+            documentCounter = 1000;
+            loadArchivedDocuments();
+            alert('All locally saved documents have been cleared.');
         }
-
-        // ============================
-        // UTILITY FUNCTIONS
-        // ============================
-        function formatCurrency(amount) {
-            // [This function remains the same]
+    }
+    
+    // Close the preview modal
+    function closeModal() {
+        previewModal.classList.remove('active');
+    }
+    
+    // Download PDF from preview (called from modal button)
+    window.downloadPDFFromPreview = function() {
+        if (currentDocumentData) {
+            generateAndSavePDF();
         }
-
-        function switchTab(tabName) {
-            // [This function remains the same]
-        }
-
-        // Make functions available globally for onclick handlers
-        window.removeItemRow = removeItemRow;
-        window.viewArchivedDocument = viewArchivedDocument;
-        window.recreateDocument = recreateDocument;
-        window.deleteArchivedDocument = deleteArchivedDocument;
-    </script>
-</body>
-</html>
+    };
+    
+    // Make closeModal available globally for modal button
+    window.closeModal = closeModal;
+});
