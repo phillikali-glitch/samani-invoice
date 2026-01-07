@@ -795,8 +795,11 @@
             // Preview button
             document.getElementById('previewBtn').addEventListener('click', generatePreview);
 
-            // Generate PDF button
-            document.getElementById('generatePdfBtn').addEventListener('click', generatePDFFromPreview);
+            // Generate PDF button (main button)
+            document.getElementById('generatePdfBtn').addEventListener('click', function() {
+                if (!validateForm()) return;
+                generatePDFFromPreview();
+            });
 
             // Clear form button
             document.getElementById('clearFormBtn').addEventListener('click', clearForm);
@@ -809,16 +812,30 @@
             // Print preview
             document.getElementById('printPreviewBtn').addEventListener('click', function() {
                 const previewContent = document.getElementById('previewContent');
-                const originalContent = document.body.innerHTML;
-                
-                document.body.innerHTML = previewContent.innerHTML;
-                window.print();
-                document.body.innerHTML = originalContent;
-                location.reload();
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(`
+                    <html>
+                        <head>
+                            <title>Print Document</title>
+                            <style>
+                                body { font-family: Arial, sans-serif; margin: 20px; }
+                                img { max-width: 100%; height: auto; }
+                            </style>
+                        </head>
+                        <body>
+                            ${previewContent.innerHTML}
+                        </body>
+                    </html>
+                `);
+                printWindow.document.close();
+                printWindow.focus();
+                printWindow.print();
+                printWindow.close();
             });
 
             // Download PDF from preview
             document.getElementById('downloadPdfBtn').addEventListener('click', function() {
+                if (!validateForm()) return;
                 generatePDFFromPreview();
             });
 
@@ -1215,41 +1232,56 @@
         }
 
         async function generatePDFFromPreview() {
-            if (!validateForm()) return;
-            
-            // Generate preview content first
-            const formData = collectFormData();
-            const previewHTML = createPreviewHTML(formData);
-            document.getElementById('previewContent').innerHTML = previewHTML;
-            
-            // Use html2canvas to capture the preview content
-            const element = document.getElementById('previewContent');
-            
             try {
-                const canvas = await html2canvas(element, {
+                // Show loading message
+                const originalBtnText = document.getElementById('generatePdfBtn').innerHTML;
+                document.getElementById('generatePdfBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating PDF...';
+                
+                const data = collectFormData();
+                const previewHTML = createPreviewHTML(data);
+                
+                // Create a temporary div for PDF generation
+                const tempDiv = document.createElement('div');
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.left = '-9999px';
+                tempDiv.style.top = '0';
+                tempDiv.style.width = '800px';
+                tempDiv.innerHTML = previewHTML;
+                document.body.appendChild(tempDiv);
+                
+                // Use html2canvas to capture the content
+                const canvas = await html2canvas(tempDiv, {
                     scale: 2,
                     useCORS: true,
-                    logging: false
+                    logging: false,
+                    backgroundColor: '#ffffff'
                 });
                 
+                // Remove temporary div
+                document.body.removeChild(tempDiv);
+                
+                // Convert canvas to image
+                const imgData = canvas.toDataURL('image/png');
+                const imgWidth = 210; // A4 width in mm
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                
+                // Create PDF
                 const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 
-                const imgWidth = 210; // A4 width in mm
-                const imgHeight = canvas.height * imgWidth / canvas.width;
-                
-                const imgData = canvas.toDataURL('image/png');
-                
-                // Add image to PDF
                 pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
                 
-                // Save PDF
+                // Save the PDF
                 const fileName = `${data.docType}_${data.docRef}.pdf`;
                 pdf.save(fileName);
+                
+                // Restore button text
+                document.getElementById('generatePdfBtn').innerHTML = originalBtnText;
                 
             } catch (error) {
                 console.error('Error generating PDF:', error);
                 alert('Error generating PDF. Please try again.');
+                document.getElementById('generatePdfBtn').innerHTML = '<i class="fas fa-file-pdf"></i> Generate PDF';
             }
         }
 
